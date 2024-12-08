@@ -18,7 +18,6 @@ export class CartService {
     });
 
     if (!cart) {
-      this.logger.warn(`Cart not found for user: ${userId}`);
       throw new NotFoundException('Cart not found');
     }
 
@@ -35,7 +34,6 @@ export class CartService {
     let cart = await this.prisma.cart.findUnique({ where: { userId } });
     if (!cart) {
       cart = await this.prisma.cart.create({ data: { userId } });
-      this.logger.log(`Created a new cart for user: ${userId}`);
     }
 
     // Check if the product is already in the cart
@@ -56,7 +54,6 @@ export class CartService {
       });
     }    
 
-    this.logger.log(`Added product ${coffeeId} to cart for user: ${userId}`);
     return this.getCart(userId);
   }
    
@@ -80,8 +77,8 @@ export class CartService {
     }
 
     await this.prisma.cartItem.delete({ where: { id: item.id } });
-    this.logger.log(`Removed product ${coffeeId} from cart for user: ${userId}`);
-    return this.getCart(userId);
+    
+    return { message: `Removed product ${coffeeId} from cart for user: ${userId}` };
   }
 
   /**
@@ -97,8 +94,6 @@ export class CartService {
       throw new NotFoundException('Cart is empty or does not exist');
     }
 
-    // Logic for handling order creation or payment processing can be added here
-    this.logger.log(`User ${userId} checked out their cart`);
 
     // Clear the cart after checkout
     await this.prisma.cartItem.deleteMany({ where: { cartId: cart.id } });

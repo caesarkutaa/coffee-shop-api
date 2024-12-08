@@ -1,5 +1,6 @@
-import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus, Logger, NotFoundException } from '@nestjs/common';
 import axios from 'axios';
+import { PrismaService } from '../prisma/prisma.service'; // Import PrismaService
 import { InitializePaymentDto } from '../Dtos/payment.dto';
 
 @Injectable()
@@ -9,11 +10,24 @@ export class PaymentsService {
   private readonly paystackBaseUrl = process.env.PAYSTACK_BASE_URL;
   private readonly paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
 
+  constructor(private readonly prisma: PrismaService) {}
+
   /**
    * Initialize a payment session with Paystack
    */
   async initializePayment(paymentDto: InitializePaymentDto) {
-    const { email, amount, orderId } = paymentDto;
+    const { email, orderId } = paymentDto;
+
+    // Fetch the order to get the total amount
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    const amount = order.total; // Total amount from the order
 
     try {
       const response = await axios.post(
@@ -40,11 +54,9 @@ export class PaymentsService {
         reference: data.data.reference,
       };
     } catch (error) {
-      this.logger.error(`Error initializing payment: ${error.message}`);
-      throw new HttpException(
-        'Unable to initialize payment. Please try again later.',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      const errorMessage = error.response?.data?.message || error.message || 'Unable to initialize payment.';
+      this.logger.error(`Error initializing payment: ${errorMessage}`);
+      throw new HttpException(errorMessage, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 
@@ -52,7 +64,10 @@ export class PaymentsService {
    * Verify the payment status with Paystack
    */
   async verifyPayment(reference: string) {
+    this.logger.log(`Starting payment verification for reference: ${reference}`);
+
     try {
+      // Make the request to Paystack's verify endpoint
       const response = await axios.get(
         `${this.paystackBaseUrl}/transaction/verify/${reference}`,
         {
@@ -63,22 +78,44 @@ export class PaymentsService {
       );
 
       const { data } = response;
-      if (data.data.status !== 'success') {
-        throw new HttpException('Payment verification failed', HttpStatus.BAD_REQUEST);
+
+      // Check if the response status is valid
+      if (!data.status) {
+        this.logger.warn(`Paystack verification failed: ${data.message}`);
+        throw new HttpException(data.message || 'Verification failed', HttpStatus.BAD_REQUEST);
       }
 
-      this.logger.log(`Payment verified successfully: ${reference}`);
-      return {
-        status: data.data.status,
-        amount: data.data.amount / 100, // Convert amount back from kobo to naira
-        currency: data.data.currency,
-        orderId: data.data.metadata.orderId,
-        paymentDate: data.data.paid_at,
-      };
+      const paymentStatus = data.data.status; // e.g., "success", "abandoned", "failed"
+      this.logger.log(`Payment status for reference ${reference}: ${paymentStatus}`);
+
+      // Handle specific payment statuses
+      if (paymentStatus === 'success') {
+        // Update the order status to "completed"
+        const orderId = data.data.metadata.orderId;
+        await this.prisma.order.update({
+          where: { id: orderId },
+          data: { status: 'completed' },
+        });
+
+        this.logger.log(`Payment verified successfully for reference: ${reference}`);
+        return {
+          status: 'success',
+          amount: data.data.amount / 100, // Convert amount from kobo to Naira
+          currency: data.data.currency,
+          orderId: data.data.metadata.orderId,
+          paymentDate: data.data.paid_at,
+        };
+      } else if (paymentStatus === 'abandoned') {
+        this.logger.warn(`Payment verification failed for reference: ${reference}, status: abandoned`);
+        throw new HttpException('Payment was not completed by the user.', HttpStatus.PAYMENT_REQUIRED);
+      } else {
+        this.logger.error(`Payment verification failed with status: ${paymentStatus}`);
+        throw new HttpException(`Payment verification failed with status: ${paymentStatus}`, HttpStatus.BAD_REQUEST);
+      }
     } catch (error) {
-      this.logger.error(`Error verifying payment: ${error.message}`);
-      throw new HttpException('Unable to verify payment. Please try again later.', HttpStatus.INTERNAL_SERVER_ERROR);
+      const errorMessage = error.response?.data?.message || error.message || 'Payment verification failed';
+      this.logger.error(`Error verifying payment: ${errorMessage}`);
+      throw new HttpException(errorMessage, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 }
-

@@ -52,6 +52,7 @@ export class CoffeeService {
     const coffee = await this.prisma.coffee.findUnique({ where: { id } });
     if (!coffee) throw new NotFoundException('Coffee item not found');
 
-    return this.prisma.coffee.delete({ where: { id } });
+    await this.prisma.coffee.delete({ where: { id } });
+    return { message: `Removed product ${coffee} Successfully ` };
   }
 }

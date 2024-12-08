@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsEmail, IsNumber } from 'class-validator';
+import { IsNotEmpty, IsString, IsEmail } from 'class-validator';
 
 /**
  * DTO for initializing a payment
@@ -8,11 +8,16 @@ export class InitializePaymentDto {
   @IsEmail({}, { message: 'Invalid email address' })
   email: string;
 
-  @IsNotEmpty({ message: 'Amount is required' })
-  @IsNumber({}, { message: 'Amount must be a number' })
-  amount: number;
-
   @IsNotEmpty({ message: 'Order ID is required' })
   @IsString({ message: 'Order ID must be a string' })
   orderId: string;
+}
+
+/**
+ * DTO for verifying a payment
+ */
+export class VerifyPaymentDto {
+  @IsNotEmpty({ message: 'Payment reference is required' })
+  @IsString({ message: 'Payment reference must be a string' })
+  reference: string;
 }
